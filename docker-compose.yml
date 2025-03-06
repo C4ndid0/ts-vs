@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./lib:/app/lib
+    environment:
+      - NODE_ENV=production
+  test:
+    build: .
+    command: yarn test
+    volumes:
+      - ./lib:/app/lib
+    environment:
+      - NODE_ENV=test
