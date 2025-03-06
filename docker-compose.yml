@@ -3,4 +3,4 @@ services:
     build: .
     ports:
       - "3000:3000"
-    command: sh -c "Xvfb :99 -screen 0 1024x768x16 & export DISPLAY=:99 && yarn dev"
+    command: sh -c "Xvfb :99 -screen 0 1024x768x16 & export DISPLAY=:99 && npm start"
