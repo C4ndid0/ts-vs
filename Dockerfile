@@ -1,26 +1,22 @@
 FROM node:16.20.2
 
-# Instalar dependências do sistema, incluindo Python
+# Install system dependencies, including GTK+ and Xvfb
 RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-dev \
-    python3-pip \
-    build-essential \
+    libgtk2.0-0 \
+    xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copiar arquivos de dependências
+# Copy dependency files and install Node.js packages
 COPY package.json yarn.lock tsconfig.json ./
-
-# Instalar dependências do Node.js
 RUN yarn install --frozen-lockfile
 
-# Copiar o restante do código
+# Copy the rest of the application code
 COPY . .
 
-# Expor a porta
+# Expose the application port
 EXPOSE 3000
 
-# Comando para iniciar a aplicação
-CMD ["yarn", "dev"]
+# Start Xvfb and set the DISPLAY environment variable before running the app
+CMD ["sh", "-c", "Xvfb :99 -screen 0 1024x768x16 & export DISPLAY=:99 && yarn dev"]
