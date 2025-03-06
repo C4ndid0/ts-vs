@@ -1,31 +1,26 @@
-FROM node:16-alpine
+FROM node:16.20.2
+
+# Instalar dependências do sistema, incluindo Python
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-dev \
+    python3-pip \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Instalar dependências do sistema (incluindo as sugeridas)
-RUN apk add --no-cache \
-    gdk-pixbuf \
-    xvfb \
-    xauth \
-    openssl \
-    libxml2 \
-    ttf-dejavu && \
-    ln -s /usr/lib/libxml2.so.2 /usr/lib/libxml2.so
-
-# Copiar arquivos de configuração
+# Copiar arquivos de dependências
 COPY package.json yarn.lock tsconfig.json ./
 
-# Instalar dependências com Yarn
+# Instalar dependências do Node.js
 RUN yarn install --frozen-lockfile
 
-# Copiar código fonte e biblioteca
-COPY src/ ./src/
-COPY lib/ ./lib/
+# Copiar o restante do código
+COPY . .
 
-# Verificar se a biblioteca está presente
-RUN ls -la lib/linux/ && test -f lib/linux/libacbrcep64.so || (echo "Error: libacbrcep64.so not found" && exit 1)
-
-# Compilar TypeScript
-RUN yarn build
-
+# Expor a porta
 EXPOSE 3000
-CMD ["yarn", "start"]
+
+# Comando para iniciar a aplicação
+CMD ["yarn", "dev"]
