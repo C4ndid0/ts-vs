@@ -1,18 +1,24 @@
-FROM node:20-slim
+FROM node:20
+
+# Define o diretório de trabalho
 WORKDIR /app
-COPY package.json package-lock.json ./
+
+# Instala dependências necessárias para a ACBrLib no Linux
+RUN apt-get update && apt-get install -y \
+    libgtk2.0-0 \
+    libssl-dev \
+    xvfb \
+    libxml2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copia os arquivos do projeto
+COPY package*.json ./
 RUN npm install
 COPY . .
-COPY lib/linux/libacbrcep64.so /app/lib/linux/libacbrcep64.so
-COPY ACBrLib.ini /app/ACBrLib.ini
-RUN chmod +x /app/lib/linux/libacbrcep64.so
-RUN mkdir -p /app/logs && chmod -R 777 /app/logs
-RUN apt-get update && apt-get install -y \
-    libffi-dev \
-    libc6 \
-    libssl-dev \
-    libgtk2.0-0 \
-    xvfb \
-    gdb \
-    && rm -rf /var/lib/apt/lists/*
-CMD ["sh", "-c", "Xvfb :99 -screen 0 1024x768x16 & npm start"]
+
+# Copia a biblioteca e o .ini para o container
+COPY lib/linux/libacbrcep64.so /app/lib/linux/
+COPY ACBrLib.ini /app/
+
+# Configura o Xvfb e inicia o servidor
+CMD ["sh", "-c", "Xvfb :99 -screen 0 1024x768x24 & npm start"]
