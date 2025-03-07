@@ -1,24 +1,16 @@
-import * as path from 'path';
 import { define, open, DataType } from 'ffi-rs';
+import * as fs from 'fs';
 
-// Define the interface for ACBrLib functions
 interface ACBrLib {
   CEP_Inicializar: (params: [string, string]) => { errnoCode: number; errnoMessage: string; value: number };
   CEP_Finalizar: () => { errnoCode: number; errnoMessage: string; value: number };
-  CEP_BuscarPorCEP: (params: [string, Buffer, Buffer]) => { errnoCode: number; errnoMessage: string; value: number };
-  CEP_UltimoRetorno: (params: [Buffer, Buffer]) => { errnoCode: number; errnoMessage: string; value: number };
+  CEP_BuscarPorCEP: (params: [string, Buffer, number]) => { errnoCode: number; errnoMessage: string; value: number };
+  CEP_UltimoRetorno: (params: [Buffer, number]) => { errnoCode: number; errnoMessage: string; value: number };
 }
 
-// Determine the library path based on the platform
-const platform = process.platform;
-const libPath = platform === 'win32'
-  ? path.join(__dirname, '../lib/windows/ACBrCEP64.dll')
-  : path.join(__dirname, '../lib/linux/libacbrcep64.so');
-
-// Load the library into memory
+const libPath = '/app/lib/linux/libacbrcep64.so';
 open({ library: libPath, path: libPath });
 
-// Define the ACBrLib functions using define with correct DataType values
 const lib = define({
   CEP_Inicializar: {
     library: libPath,
@@ -35,58 +27,61 @@ const lib = define({
   CEP_BuscarPorCEP: {
     library: libPath,
     retType: DataType.I32,
-    paramsType: [DataType.String, DataType.U8Array, DataType.U8Array],
+    paramsType: [DataType.String, DataType.U8Array, DataType.I32], // esTamanho como I32
     errno: true,
   },
   CEP_UltimoRetorno: {
     library: libPath,
     retType: DataType.I32,
-    paramsType: [DataType.U8Array, DataType.U8Array],
+    paramsType: [DataType.U8Array, DataType.I32], // esTamanho como I32
     errno: true,
   },
 }) as unknown as ACBrLib;
 
-// Exported buscarCEP function
 export async function buscarCEP(cep: string): Promise<any> {
-  const buflength = 4024;
+  const buflength = 16384;
   const sResposta = Buffer.alloc(buflength);
-  const esTamanho = Buffer.alloc(4);
-  esTamanho.writeInt32LE(buflength, 0);
+
+  const logPath = '/app/logs/acbr.log';
+  fs.writeFileSync(logPath, 'Iniciando consulta de CEP\n', { flag: 'a' });
 
   console.log('Parâmetros para CEP_Inicializar:', ['/app/ACBrLib.ini', '']);
   const iniResult = lib.CEP_Inicializar(['/app/ACBrLib.ini', '']);
   console.log('Resultado de CEP_Inicializar:', iniResult);
+  fs.appendFileSync(logPath, `Inicialização: ${JSON.stringify(iniResult)}\n`);
+
   if (iniResult.value !== 0) {
     const erroBuf = Buffer.alloc(buflength);
-    const erroTam = Buffer.alloc(4);
-    erroTam.writeInt32LE(buflength, 0);
+    const erroTam = buflength;
     console.log('Parâmetros para CEP_UltimoRetorno (init error):', [erroBuf, erroTam]);
     const ultimoRetornoResult = lib.CEP_UltimoRetorno([erroBuf, erroTam]);
     console.log('Resultado de CEP_UltimoRetorno:', ultimoRetornoResult);
-    console.log('Mensagem de erro bruta:', erroBuf.toString('utf8', 0, erroTam.readInt32LE(0)).trim());
-    throw new Error(`Failed to initialize: ${erroBuf.toString('utf8', 0, erroTam.readInt32LE(0)).trim()}`);
+    console.log('Mensagem de erro bruta:', erroBuf.toString('utf8', 0, erroTam).trim());
+    throw new Error(`Failed to initialize: ${erroBuf.toString('utf8', 0, erroTam).trim()}`);
   }
 
-  console.log('Parâmetros para CEP_BuscarPorCEP:', [cep, sResposta, esTamanho]);
-  const result = lib.CEP_BuscarPorCEP([cep, sResposta, esTamanho]);
+  console.log('Parâmetros para CEP_BuscarPorCEP:', [cep, sResposta, buflength]);
+  const result = lib.CEP_BuscarPorCEP([cep, sResposta, buflength]);
   console.log('Resultado de CEP_BuscarPorCEP:', result);
-  if (result.value !== 0) { // Verifica result.value
+  fs.appendFileSync(logPath, `Resultado CEP_BuscarPorCEP: ${JSON.stringify(result)}\n`);
+
+  if (result.value !== 0) {
     const erroBuf = Buffer.alloc(buflength);
-    const erroTam = Buffer.alloc(4);
-    erroTam.writeInt32LE(buflength, 0);
+    const erroTam = buflength;
     console.log('Parâmetros para CEP_UltimoRetorno (lookup error):', [erroBuf, erroTam]);
     const ultimoRetornoResult = lib.CEP_UltimoRetorno([erroBuf, erroTam]);
     console.log('Resultado de CEP_UltimoRetorno:', ultimoRetornoResult);
-    console.log('Mensagem de erro bruta:', erroBuf.toString('utf8', 0, erroTam.readInt32LE(0)).trim());
+    console.log('Mensagem de erro bruta:', erroBuf.toString('utf8', 0, erroTam).trim());
     console.log('Chamando CEP_Finalizar após erro');
     lib.CEP_Finalizar();
-    throw new Error(`CEP lookup failed: ${erroBuf.toString('utf8', 0, erroTam.readInt32LE(0)).trim()}`);
+    throw new Error(`CEP lookup failed: ${erroBuf.toString('utf8', 0, erroTam).trim()}`);
   }
 
-  const resposta = sResposta.toString('utf8', 0, esTamanho.readInt32LE(0)).trim();
+  const tamanhoResposta = sResposta.indexOf(0) !== -1 ? sResposta.indexOf(0) : buflength;
+  const resposta = sResposta.toString('utf8', 0, tamanhoResposta).trim();
   console.log('Resposta bruta:', resposta);
   console.log('Chamando CEP_Finalizar após sucesso');
   lib.CEP_Finalizar();
 
-  return JSON.parse(resposta); // Assuming the response is JSON
+  return JSON.parse(resposta);
 }
