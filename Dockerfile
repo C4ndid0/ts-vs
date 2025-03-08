@@ -1,24 +1,23 @@
 FROM node:20
 
-# Define o diretório de trabalho
 WORKDIR /app
 
-# Instala dependências necessárias para a ACBrLib no Linux
-RUN apt-get update && apt-get install -y \
-    libgtk2.0-0 \
-    libssl-dev \
-    xvfb \
-    libxml2 \
-    && rm -rf /var/lib/apt/lists/*
+# Adiciona o repositório Debian Stretch para instalar libssl1.0.0
+RUN echo "deb http://deb.debian.org/debian stretch main" >> /etc/apt/sources.list.d/stretch.list \
+    && apt-get update \
+    && apt-get install -y \
+        libgtk2.0-0 \
+        libssl1.0.0=1.0.2u-1~deb9u7 \
+        xvfb \
+        libxml2 \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm /etc/apt/sources.list.d/stretch.list
 
-# Copia os arquivos do projeto
 COPY package*.json ./
 RUN npm install
 COPY . .
 
-# Copia a biblioteca e o .ini para o container
 COPY lib/linux/libacbrcep64.so /app/lib/linux/
 COPY ACBrLib.ini /app/
 
-# Configura o Xvfb e inicia o servidor
 CMD ["sh", "-c", "Xvfb :99 -screen 0 1024x768x24 & npm start"]

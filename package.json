@@ -18,9 +18,7 @@
     "typescript": "^5.3.3"
   },
   "optionalDependencies": {
-    "@yuuang/ffi-rs-win32-x64-msvc": "1.2.8"
-  },
-  "os": [
-    "win32"
-  ]
+    "@yuuang/ffi-rs-win32-x64-msvc": "1.2.8",
+    "@yuuang/ffi-rs-linux-x64-gnu": "1.2.8"
+  }
 }

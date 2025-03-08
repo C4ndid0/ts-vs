@@ -1,89 +1,392 @@
-import { define, open, DataType, createPointer, restorePointer, JsExternal } from 'ffi-rs';
+import * as os from 'os';
+import { open, define, DataType } from 'ffi-rs';
 import * as path from 'path';
+import * as fs from 'fs';
 
-// Define o caminho da biblioteca com base no sistema operacional
-const libPath = process.platform === 'win32'
-  ? path.join(__dirname, '../lib/windows/ACBrCEP64.dll') // Windows
-  : path.join(__dirname, '../lib/linux/libacbrcep64.so'); // Linux
-
-// Abre a biblioteca nativa
-open({ library: 'ACBrCEP', path: libPath });
-
-// Interface que define as funções da biblioteca ACBrCEP
-interface ACBrLib {
-  CEP_Inicializar: (params: [string, string]) => { errnoCode: number; errnoMessage: string; value: number };
-  CEP_Finalizar: () => { errnoCode: number; errnoMessage: string; value: number };
-  CEP_BuscarPorCEP: (params: [string, JsExternal, JsExternal]) => { errnoCode: number; errnoMessage: string; value: number };
-  CEP_UltimoRetorno: (params: [JsExternal, number]) => { errnoCode: number; errnoMessage: string; value: number };
+/**
+ * Interface para os símbolos (funções) exportados pela biblioteca ACBrCEP
+ */
+export interface ACBrCEPLib {
+  CEP_Inicializar: (paramsValue: [string, string]) => { value: number; errnoCode: number; errnoMessage: string };
+  CEP_Finalizar: (paramsValue: []) => { value: number; errnoCode: number; errnoMessage: string };
+  CEP_Nome: (paramsValue: [Buffer, number]) => { value: number; errnoCode: number; errnoMessage: string };
+  CEP_Versao: (paramsValue: [Buffer, number]) => { value: number; errnoCode: number; errnoMessage: string };
+  CEP_UltimoRetorno: (paramsValue: [Buffer, number]) => { value: number; errnoCode: number; errnoMessage: string };
+  CEP_ConfigImportar: (paramsValue: [string]) => { value: number; errnoCode: number; errnoMessage: string };
+  CEP_ConfigExportar: (paramsValue: [Buffer, number]) => { value: number; errnoCode: number; errnoMessage: string };
+  CEP_ConfigLer: (paramsValue: [string]) => { value: number; errnoCode: number; errnoMessage: string };
+  CEP_ConfigGravar: (paramsValue: [string]) => { value: number; errnoCode: number; errnoMessage: string };
+  CEP_BuscarPorCEP: (paramsValue: [string, Buffer, number]) => { value: number; errnoCode: number; errnoMessage: string };
+  CEP_BuscarPorLogradouro: (paramsValue: [string, string, string, string, string, Buffer, number]) => { value: number; errnoCode: number; errnoMessage: string };
 }
 
-// Configura as funções da biblioteca usando ffi-rs
-const lib = define({
-  CEP_Inicializar: { library: 'ACBrCEP', retType: DataType.I32, paramsType: [DataType.String, DataType.String], errno: true },
-  CEP_Finalizar: { library: 'ACBrCEP', retType: DataType.I32, paramsType: [], errno: true },
-  CEP_BuscarPorCEP: { library: 'ACBrCEP', retType: DataType.I32, paramsType: [DataType.String, DataType.External, DataType.External], errno: true },
-  CEP_UltimoRetorno: { library: 'ACBrCEP', retType: DataType.I32, paramsType: [DataType.External, DataType.I32], errno: true },
-}) as unknown as ACBrLib;
+/**
+ * Classe para gerenciar a biblioteca ACBrCEP em diferentes plataformas
+ */
+export class ACBrLoader {
+  private library: ACBrCEPLib | null = null;
+  private libPath: string;
+  private initialized: boolean = false;
+  private configPath: string;
+  private libName: string = 'ACBrCEP';
 
-// Inicializa a biblioteca uma vez no carregamento do módulo
-const iniPath = path.join(__dirname, '../ACBrLib.ini');
-console.log('Inicializando a biblioteca no carregamento do módulo com .ini:', iniPath);
-const iniResult = lib.CEP_Inicializar([iniPath, '']);
-if (iniResult.value !== 0) {
-  throw new Error('Falha ao inicializar a biblioteca ACBrCEP no carregamento do módulo');
-}
-
-// Função principal para buscar informações de um CEP
-export async function buscarCEP(cep: string): Promise<any> {
-  console.log('Iniciando busca do CEP:', cep);
-  if (!cep || typeof cep !== 'string' || cep.trim().length !== 8) {
-    throw new Error('CEP inválido. Forneça um CEP de 8 dígitos.');
+  constructor(libDir?: string, configPath?: string) {
+  const platform = os.platform();
+  const baseDir = libDir || path.join(process.cwd(), 'lib');
+  
+  if (platform === 'win32') {
+    this.libPath = path.join(baseDir, 'windows', 'ACBrCEP64.dll');
+  } else if (platform === 'linux') {
+    this.libPath = path.join(baseDir, 'linux', 'libacbrcep64.so'); // Caminho corrigido
+  } else {
+    throw new Error(`Plataforma não suportada: ${platform}`);
   }
 
-  const buflength = 16384;
-  const sResposta = Buffer.alloc(buflength);
-  const esTamanho = Buffer.alloc(4);
-  esTamanho.writeInt32LE(buflength, 0);
-
-  // Cria ponteiros nativos para os buffers
-  const [sRespostaPtr] = createPointer({
-    paramsType: [DataType.U8Array],
-    paramsValue: [sResposta],
-  });
-  const [esTamanhoPtr] = createPointer({
-    paramsType: [DataType.U8Array],
-    paramsValue: [esTamanho],
-  });
-
-  console.log('Chamando CEP_BuscarPorCEP com CEP:', cep);
-  const result = lib.CEP_BuscarPorCEP([cep, sRespostaPtr, esTamanhoPtr]);
-  console.log('Resultado CEP_BuscarPorCEP:', result);
-
-  if (result.value !== 0) {
-    const erroBuf = Buffer.alloc(buflength);
-    const [erroBufPtr] = createPointer({
-      paramsType: [DataType.U8Array],
-      paramsValue: [erroBuf],
-    });
-    console.log('Chamando CEP_UltimoRetorno');
-    lib.CEP_UltimoRetorno([erroBufPtr, buflength]);
-    const [erroBufResult] = restorePointer({ retType: [DataType.U8Array], paramsValue: [erroBufPtr] }) as Buffer[];
-    throw new Error(`Falha na busca do CEP: ${erroBufResult.toString('utf8', 0, buflength).trim() || 'Erro desconhecido (código: ' + result.value + ')'}`);
+  if (!fs.existsSync(this.libPath)) {
+    throw new Error(`Biblioteca não encontrada: ${this.libPath}`);
   }
 
-  // Recupera os valores dos ponteiros
-  const [sRespostaResult] = restorePointer({ retType: [DataType.U8Array], paramsValue: [sRespostaPtr] }) as Buffer[];
-  const [esTamanhoResult] = restorePointer({ retType: [DataType.U8Array], paramsValue: [esTamanhoPtr] }) as Buffer[];
-
-  const tamanhoResposta = esTamanhoResult.readInt32LE(0);
-  const resposta = sRespostaResult.toString('utf8', 0, tamanhoResposta).trim();
-  console.log('Resposta recebida:', resposta);
-
-  return JSON.parse(resposta);
+  this.configPath = configPath || path.join(process.cwd(), 'ACBrLib.ini');
+  
+  console.log(`Usando biblioteca: ${this.libPath}`);
+  console.log(`Arquivo de configuração: ${this.configPath}`);
 }
 
-// Finaliza a biblioteca ao encerrar o processo
-process.on('exit', () => {
-  console.log('Finalizando a biblioteca ao encerrar o processo');
-  lib.CEP_Finalizar();
-});
+  public load(): void {
+    if (this.library) return;
+
+    try {
+      open({
+        library: this.libName,
+        path: this.libPath
+      });
+
+      this.library = define({
+        CEP_Inicializar: {
+          library: this.libName,
+          retType: DataType.I32,
+          paramsType: [DataType.String, DataType.String],
+          errno: true
+        },
+        CEP_Finalizar: {
+          library: this.libName,
+          retType: DataType.I32,
+          paramsType: [],
+          errno: true
+        },
+        CEP_Nome: {
+          library: this.libName,
+          retType: DataType.I32,
+          paramsType: [DataType.U8Array, DataType.I32],
+          errno: true
+        },
+        CEP_Versao: {
+          library: this.libName,
+          retType: DataType.I32,
+          paramsType: [DataType.U8Array, DataType.I32],
+          errno: true
+        },
+        CEP_UltimoRetorno: {
+          library: this.libName,
+          retType: DataType.I32,
+          paramsType: [DataType.U8Array, DataType.I32],
+          errno: true
+        },
+        CEP_ConfigImportar: {
+          library: this.libName,
+          retType: DataType.I32,
+          paramsType: [DataType.String],
+          errno: true
+        },
+        CEP_ConfigExportar: {
+          library: this.libName,
+          retType: DataType.I32,
+          paramsType: [DataType.U8Array, DataType.I32],
+          errno: true
+        },
+        CEP_ConfigLer: {
+          library: this.libName,
+          retType: DataType.I32,
+          paramsType: [DataType.String],
+          errno: true
+        },
+        CEP_ConfigGravar: {
+          library: this.libName,
+          retType: DataType.I32,
+          paramsType: [DataType.String],
+          errno: true
+        },
+        CEP_BuscarPorCEP: {
+          library: this.libName,
+          retType: DataType.I32,
+          paramsType: [DataType.String, DataType.U8Array, DataType.I32],
+          errno: true
+        },
+        CEP_BuscarPorLogradouro: {
+          library: this.libName,
+          retType: DataType.I32,
+          paramsType: [DataType.String, DataType.String, DataType.String, DataType.String, DataType.String, DataType.U8Array, DataType.I32],
+          errno: true
+        }
+      }) as ACBrCEPLib;
+
+      console.log('Biblioteca carregada com sucesso');
+    } catch (error) {
+      console.error('Erro ao carregar a biblioteca:', error);
+      throw new Error(`Falha ao carregar a biblioteca: ${error}`);
+    }
+  }
+
+ public initialize(): number {
+  if (!this.library) {
+    this.load();
+  }
+
+  if (!this.initialized && this.library) {
+    console.log(`Inicializando a biblioteca com arquivo de configuração: ${this.configPath}`);
+    console.log(`Parâmetros: configPath=${this.configPath}, chaveCrypt=""`);
+    console.log(`Arquivo de configuração existe? ${fs.existsSync(this.configPath)}`);
+    if (fs.existsSync(this.configPath)) {
+      console.log(`Conteúdo do ACBrLib.ini: ${fs.readFileSync(this.configPath, 'utf8')}`);
+    }
+    
+    try {
+      const result = this.library.CEP_Inicializar([this.configPath, ""]);
+      console.log(`Resultado da inicialização: ${JSON.stringify(result)}`);
+      
+      if (result.value >= 0) {
+        this.initialized = true;
+        
+        const bufferSize = 1024;
+        const nomeBuffer = Buffer.alloc(bufferSize);
+        const versaoBuffer = Buffer.alloc(bufferSize);
+        
+        this.library.CEP_Nome([nomeBuffer, bufferSize]);
+        this.library.CEP_Versao([versaoBuffer, bufferSize]);
+        
+        const nome = nomeBuffer.toString('utf8').replace(/\0/g, '');
+        const versao = versaoBuffer.toString('utf8').replace(/\0/g, '');
+        
+        console.log(`Biblioteca inicializada: ${nome} - Versão: ${versao}`);
+      } else {
+        console.error(`Erro ao inicializar biblioteca: ${result.value}`);
+        console.error(`Mensagem de erro: ${this.getUltimoRetorno()}`);
+      }
+      
+      return result.value;
+    } catch (error) {
+      console.error(`Exceção ao chamar CEP_Inicializar: ${error}`);
+      return -1;
+    }
+  }
+
+  return 0;
+}
+
+  public finalize(): number {
+    if (this.initialized && this.library) {
+      console.log('Finalizando biblioteca ACBrCEP');
+      const result = this.library.CEP_Finalizar([]);
+      
+      if (result.value >= 0) {
+        this.initialized = false;
+        console.log('Biblioteca finalizada com sucesso');
+      } else {
+        console.error(`Erro ao finalizar biblioteca: ${result.value}`);
+        console.error(`Mensagem de erro: ${this.getUltimoRetorno()}`);
+      }
+      
+      return result.value;
+    }
+    return 0;
+  }
+
+  public buscarPorCEP(cep: string): any {
+    const cepApenasNumeros = cep.replace(/\D/g, '');
+    if (cepApenasNumeros.length !== 8) {
+      return {
+        success: false,
+        error: {
+          code: -1,
+          message: 'CEP inválido. O CEP deve conter 8 dígitos numéricos.'
+        }
+      };
+    }
+
+    if (!this.initialized) {
+      this.initialize();
+    }
+
+    if (!this.library) {
+      throw new Error('Biblioteca não carregada');
+    }
+
+    console.log(`Iniciando busca do CEP: ${cepApenasNumeros}`);
+    
+    try {
+      const bufferSize = 1024 * 10;
+      const buffer = Buffer.alloc(bufferSize);
+      
+      const result = this.library.CEP_BuscarPorCEP([cepApenasNumeros, buffer, bufferSize]);
+      
+      if (result.value >= 0) {
+        const responseStr = buffer.toString('utf8').replace(/\0/g, '');
+        console.log(`Resposta recebida para CEP ${cepApenasNumeros}`);
+        
+        try {
+          const data = JSON.parse(responseStr);
+          return {
+            success: true,
+            data
+          };
+        } catch (e) {
+          console.warn('Resposta não é um JSON válido:', responseStr);
+          return {
+            success: true,
+            data: responseStr
+          };
+        }
+      } else {
+        const errorMessage = this.getUltimoRetorno();
+        console.error(`Erro ao buscar CEP ${cepApenasNumeros}: ${result.value}. Mensagem: ${errorMessage}`);
+        
+        return {
+          success: false,
+          error: {
+            code: result.value,
+            message: errorMessage || 'Erro desconhecido'
+          }
+        };
+      }
+    } catch (error) {
+      console.error('Exceção ao buscar CEP:', error);
+      return {
+        success: false,
+        error: {
+          code: -999,
+          message: `Exceção: ${error}`
+        }
+      };
+    }
+  }
+
+  public buscarPorLogradouro(cidade: string, tipoLogradouro: string, logradouro: string, UF: string, bairro: string = ''): any {
+    if (!this.initialized) {
+      this.initialize();
+    }
+
+    if (!this.library) {
+      throw new Error('Biblioteca não carregada');
+    }
+
+    console.log(`Iniciando busca por logradouro: ${tipoLogradouro} ${logradouro}, ${cidade}/${UF}`);
+    
+    try {
+      const bufferSize = 1024 * 10;
+      const buffer = Buffer.alloc(bufferSize);
+      
+      const result = this.library.CEP_BuscarPorLogradouro([cidade, tipoLogradouro, logradouro, UF, bairro, buffer, bufferSize]);
+      
+      if (result.value >= 0) {
+        const responseStr = buffer.toString('utf8').replace(/\0/g, '');
+        
+        try {
+          return {
+            success: true,
+            data: JSON.parse(responseStr)
+          };
+        } catch (e) {
+          return {
+            success: true,
+            data: responseStr
+          };
+        }
+      } else {
+        const errorMessage = this.getUltimoRetorno();
+        console.error(`Erro ao buscar logradouro: ${result.value}. Mensagem: ${errorMessage}`);
+        
+        return {
+          success: false,
+          error: {
+            code: result.value,
+            message: errorMessage || 'Erro desconhecido'
+          }
+        };
+      }
+    } catch (error) {
+      console.error('Exceção ao buscar logradouro:', error);
+      return {
+        success: false,
+        error: {
+          code: -999,
+          message: `Exceção: ${error}`
+        }
+      };
+    }
+  }
+
+  public getUltimoRetorno(): string {
+    if (!this.library) {
+      throw new Error('Biblioteca não carregada');
+    }
+
+    const bufferSize = 1024 * 10;
+    const buffer = Buffer.alloc(bufferSize);
+    
+    this.library.CEP_UltimoRetorno([buffer, bufferSize]);
+    return buffer.toString('utf8').replace(/\0/g, '');
+  }
+
+  public getNome(): string {
+    if (!this.library) {
+      throw new Error('Biblioteca não carregada');
+    }
+
+    const bufferSize = 1024;
+    const buffer = Buffer.alloc(bufferSize);
+    
+    this.library.CEP_Nome([buffer, bufferSize]);
+    return buffer.toString('utf8').replace(/\0/g, '');
+  }
+
+  public getVersao(): string {
+    if (!this.library) {
+      throw new Error('Biblioteca não carregada');
+    }
+
+    const bufferSize = 1024;
+    const buffer = Buffer.alloc(bufferSize);
+    
+    this.library.CEP_Versao([buffer, bufferSize]);
+    return buffer.toString('utf8').replace(/\0/g, '');
+  }
+
+  public configExportar(): string {
+    if (!this.library) {
+      throw new Error('Biblioteca não carregada');
+    }
+
+    const bufferSize = 1024 * 50;
+    const buffer = Buffer.alloc(bufferSize);
+    
+    const result = this.library.CEP_ConfigExportar([buffer, bufferSize]);
+    
+    if (result.value >= 0) {
+      return buffer.toString('utf8').replace(/\0/g, '');
+    } else {
+      console.error(`Erro ao exportar configurações: ${result.value}`);
+      return '';
+    }
+  }
+
+  public configImportar(arquivoConfig: string): number {
+    if (!this.library) {
+      throw new Error('Biblioteca não carregada');
+    }
+
+    return this.library.CEP_ConfigImportar([arquivoConfig]).value;
+  }
+}
+
+export const acbrLib = new ACBrLoader();
+export default ACBrLoader;
