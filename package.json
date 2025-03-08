@@ -16,5 +16,11 @@
     "@types/node": "^20.11.24",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
-  }
+  },
+  "optionalDependencies": {
+    "@yuuang/ffi-rs-win32-x64-msvc": "1.2.8"
+  },
+  "os": [
+    "win32"
+  ]
 }
